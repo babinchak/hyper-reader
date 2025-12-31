@@ -1,0 +1,189 @@
+---
+alwaysApply: true
+---
+
+# SQL Migration Best Practices
+
+All SQL migrations must be **idempotent** - they should be able to run multiple times without errors.
+
+## Rules for SQL Migrations
+
+### 1. Tables
+- Always use `IF NOT EXISTS` when creating tables
+- Use `IF EXISTS` when dropping tables
+- Use `ADD COLUMN IF NOT EXISTS` when adding columns
+- Use `DROP COLUMN IF EXISTS` when removing columns
+
+```sql
+-- ✅ Good
+CREATE TABLE IF NOT EXISTS public.example (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid()
+);
+
+ALTER TABLE public.example 
+ADD COLUMN IF NOT EXISTS new_column text;
+
+-- ❌ Bad
+CREATE TABLE public.example (...);  -- Fails if table exists
+ALTER TABLE public.example ADD COLUMN new_column text;  -- Fails if column exists
+```
+
+### 2. Indexes
+- Always use `IF NOT EXISTS` when creating indexes
+- Use `IF EXISTS` when dropping indexes
+
+```sql
+-- ✅ Good
+CREATE INDEX IF NOT EXISTS example_idx ON public.example(column_name);
+DROP INDEX IF EXISTS example_idx;
+
+-- ❌ Bad
+CREATE INDEX example_idx ON public.example(column_name);  -- Fails if index exists
+```
+
+### 3. Policies (RLS)
+- **Always drop policies before creating them** if you're updating them
+- Use `IF EXISTS` when dropping policies
+- Policies cannot use `IF NOT EXISTS`, so always drop first
+
+```sql
+-- ✅ Good - Drop then create
+DROP POLICY IF EXISTS "policy_name" ON public.table_name;
+CREATE POLICY "policy_name"
+ON public.table_name FOR INSERT
+TO authenticated
+WITH CHECK (...);
+
+-- ❌ Bad
+CREATE POLICY "policy_name" ...  -- Fails if policy already exists
+```
+
+### 4. Constraints
+- Use `IF NOT EXISTS` when adding constraints
+- Use `IF EXISTS` when dropping constraints
+
+```sql
+-- ✅ Good
+ALTER TABLE public.example 
+ADD CONSTRAINT IF NOT EXISTS example_check 
+CHECK (column_name > 0);
+
+ALTER TABLE public.example 
+DROP CONSTRAINT IF EXISTS example_check;
+```
+
+### 5. Functions and Procedures
+- Use `CREATE OR REPLACE` for functions
+- Use `DROP FUNCTION IF EXISTS` before creating if you want to ensure clean state
+
+```sql
+-- ✅ Good
+CREATE OR REPLACE FUNCTION public.example_function()
+RETURNS void AS $$
+BEGIN
+  -- function body
+END;
+$$ LANGUAGE plpgsql;
+
+-- Or drop first for complete reset
+DROP FUNCTION IF EXISTS public.example_function();
+CREATE FUNCTION public.example_function() ...
+```
+
+### 6. Types and Enums
+- Use `CREATE TYPE IF NOT EXISTS` (PostgreSQL 9.1+)
+- Or check existence before creating
+
+```sql
+-- ✅ Good
+DO $$ BEGIN
+  CREATE TYPE example_status AS ENUM ('pending', 'completed');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+```
+
+### 7. Storage Buckets
+- Check if bucket exists before creating
+- Always drop policies before recreating them
+
+```sql
+-- ✅ Good - Check bucket existence
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM storage.buckets WHERE id = 'bucket_name') THEN
+    INSERT INTO storage.buckets (id, name, public) 
+    VALUES ('bucket_name', 'bucket_name', false);
+  END IF;
+END $$;
+
+-- Always drop storage policies before creating
+DROP POLICY IF EXISTS "policy_name" ON storage.objects;
+CREATE POLICY "policy_name" ...
+```
+
+## Migration File Structure
+
+Every migration file should follow this pattern:
+
+```sql
+-- Migration: Description of what this migration does
+-- Date: YYYY-MM-DD
+-- Run this in your Supabase SQL Editor
+
+-- Step 1: Drop existing objects (if updating)
+DROP POLICY IF EXISTS "old_policy" ON public.table_name;
+DROP INDEX IF EXISTS old_index_name;
+
+-- Step 2: Create/alter objects with IF NOT EXISTS
+CREATE TABLE IF NOT EXISTS public.new_table (...);
+ALTER TABLE public.table_name ADD COLUMN IF NOT EXISTS new_column text;
+CREATE INDEX IF NOT EXISTS new_index_name ON public.table_name(column_name);
+
+-- Step 3: Create new policies (after dropping old ones)
+CREATE POLICY "new_policy" ON public.table_name ...
+```
+
+## Testing Idempotency
+
+Before committing a migration, test it:
+1. Run the migration once - should succeed
+2. Run it again - should succeed without errors
+3. Verify the end state is correct
+
+## Example: Complete Idempotent Migration
+
+```sql
+-- Migration: Add user preferences table
+-- This migration is idempotent and can be run multiple times
+
+-- Drop existing table if recreating (optional - usually you want to keep data)
+-- DROP TABLE IF EXISTS public.user_preferences CASCADE;
+
+-- Create table if not exists
+CREATE TABLE IF NOT EXISTS public.user_preferences (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  preference_key text NOT NULL,
+  preference_value jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  UNIQUE(user_id, preference_key)
+);
+
+-- Add columns if not exists
+ALTER TABLE public.user_preferences 
+ADD COLUMN IF NOT EXISTS updated_at timestamp with time zone DEFAULT now();
+
+-- Create indexes if not exists
+CREATE INDEX IF NOT EXISTS user_preferences_user_id_idx 
+ON public.user_preferences(user_id);
+
+-- Drop and recreate policies (policies can't use IF NOT EXISTS)
+DROP POLICY IF EXISTS "Users can manage their own preferences" ON public.user_preferences;
+CREATE POLICY "Users can manage their own preferences"
+ON public.user_preferences
+FOR ALL
+TO authenticated
+USING (user_id = auth.uid())
+WITH CHECK (user_id = auth.uid());
+```
