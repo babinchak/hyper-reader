@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BookOpen, User, Calendar, FileText } from "lucide-react";
+import Link from "next/link";
 
 export async function BooksList() {
   const supabase = await createClient();
@@ -60,7 +61,7 @@ export async function BooksList() {
   const bookIds = userBookLinks.map((link) => link.book_id);
   const { data: books, error: booksError } = await supabase
     .from("books")
-    .select("id, title, author, file_size, file_name, created_at")
+    .select("id, title, author, file_size, file_name, created_at, readium_manifest_path")
     .in("id", bookIds)
     .order("created_at", { ascending: false });
 
@@ -90,6 +91,7 @@ export async function BooksList() {
     fileSize: book.file_size,
     fileName: book.file_name,
     createdAt: book.created_at,
+    manifestPath: book.readium_manifest_path,
   }));
 
   if (userBooks.length === 0) {
@@ -142,9 +144,14 @@ export async function BooksList() {
       <CardContent>
         <div className="space-y-4">
           {userBooks.map((book) => (
-            <div
+            <Link
               key={book.id}
-              className="flex items-start gap-4 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+              href={book.manifestPath ? `/read/${book.id}` : "#"}
+              className={`flex items-start gap-4 p-4 rounded-lg border bg-card transition-colors ${
+                book.manifestPath 
+                  ? "hover:bg-accent/50 cursor-pointer" 
+                  : "opacity-50 cursor-not-allowed"
+              }`}
             >
               <div className="flex-shrink-0">
                 <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -179,7 +186,7 @@ export async function BooksList() {
                   )}
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </CardContent>
