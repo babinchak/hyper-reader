@@ -418,28 +418,24 @@ function getElementPath(container: Node, offset: number): string {
   // Build path from body to element
   const path: string[] = [];
   let current: Element | null = element;
+  const body = current.ownerDocument?.body;
 
   // Traverse up to body
-  while (current && current !== current.ownerDocument?.body) {
+  while (current && current !== body) {
     const parent = current.parentElement;
     if (!parent) break;
 
-    // Get index of current element among siblings of same tag name
-    const siblings = Array.from(parent.children).filter(
-      (el) => el.tagName === current!.tagName
-    );
+    // Get index of current element among ALL siblings (not filtered by tag name)
+    const siblings = Array.from(parent.children);
     const index = siblings.indexOf(current);
 
-    path.unshift(`${current.tagName.toLowerCase()}[${index}]`);
+    // Use just the index, not the tag name
+    path.unshift(index.toString());
     current = parent;
   }
 
-  // Add body if we reached it
-  if (current === current?.ownerDocument?.body) {
-    path.unshift("body");
-  } else {
-    path.unshift("body"); // Default to body if we couldn't find it
-  }
+  // Don't add "body" - it's always implied since Readium always displays the body
+  // If we didn't reach body, something went wrong, but still return the path we built
 
   const elementPath = path.join("/");
   return `${elementPath}/${charOffset}`;
