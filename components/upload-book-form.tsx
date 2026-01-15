@@ -41,7 +41,7 @@ export function UploadBookForm() {
       );
       
       setFile(null);
-      const fileInput = document.getElementById('epub-file') as HTMLInputElement;
+      const fileInput = document.getElementById('book-file') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
       
     } catch (err) {
@@ -54,21 +54,21 @@ export function UploadBookForm() {
   return (
     <Card className="w-full max-w-2xl">
       <CardHeader>
-        <CardTitle>Upload EPUB Book</CardTitle>
+        <CardTitle>Upload Book</CardTitle>
         <CardDescription>
-          Upload an EPUB file to add it to your library. Duplicate books will be automatically detected.
+          Upload an EPUB or PDF file to add it to your library. Duplicate books will be automatically detected.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <label htmlFor="epub-file" className="text-sm font-medium">
-              Select EPUB File
+            <label htmlFor="book-file" className="text-sm font-medium">
+              Select EPUB or PDF File
             </label>
             <Input
-              id="epub-file"
+              id="book-file"
               type="file"
-              accept=".epub,application/epub+zip"
+              accept=".epub,.pdf,application/epub+zip,application/pdf"
               onChange={(e) => {
                 const selectedFile = e.target.files?.[0] || null;
                 setFile(selectedFile);

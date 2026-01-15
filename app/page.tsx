@@ -16,7 +16,7 @@ async function HomeContent() {
         <BookOpen className="h-16 w-16 text-muted-foreground" />
         <h1 className="text-4xl font-bold">Hyper Reader</h1>
         <p className="text-lg text-muted-foreground max-w-md">
-          Your personal EPUB library. Upload and read your books in one place.
+          Your personal EPUB and PDF library. Upload and read your books in one place.
         </p>
         <Suspense>
           <AuthButton />
@@ -35,7 +35,7 @@ async function HomeContent() {
         <div>
           <h1 className="text-3xl font-bold mb-2">My Library</h1>
           <p className="text-muted-foreground">
-            Upload EPUB books to your personal library
+            Upload EPUB or PDF books to your personal library
           </p>
         </div>
         <UploadBookForm />
@@ -50,7 +50,7 @@ async function HomeContent() {
       <BookOpen className="h-16 w-16 text-muted-foreground" />
       <h1 className="text-4xl font-bold">Hyper Reader</h1>
       <p className="text-lg text-muted-foreground max-w-md">
-        Your personal EPUB library. Upload and read your books in one place.
+        Your personal EPUB and PDF library. Upload and read your books in one place.
       </p>
       <Suspense>
         <AuthButton />

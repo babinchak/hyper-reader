@@ -32,3 +32,29 @@ export async function createClient() {
     },
   );
 }
+
+export function createServiceClient() {
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error(
+      "Missing SUPABASE_SERVICE_ROLE_KEY or SUPABASE_URL. Add SUPABASE_SERVICE_ROLE_KEY to .env.local and restart the dev server.",
+    );
+  }
+
+  return createServerClient(
+    url,
+    serviceKey,
+    {
+      cookies: {
+        getAll() {
+          return [];
+        },
+        setAll() {
+          // Service role client does not persist cookies.
+        },
+      },
+    },
+  );
+}

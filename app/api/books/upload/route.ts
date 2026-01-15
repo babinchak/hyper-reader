@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -6,6 +6,7 @@ export async function POST(request: NextRequest) {
   
   try {
     const supabase = await createClient();
+    const serviceSupabase = createServiceClient();
     console.log("[UPLOAD] Supabase client created");
     
     // Get authenticated user
@@ -27,10 +28,19 @@ export async function POST(request: NextRequest) {
     console.log("[UPLOAD] File received:", file.name, file.size, "bytes");
 
     // Validate file type
-    if (file.type !== "application/epub+zip" && !file.name.toLowerCase().endsWith(".epub")) {
+    const fileName = file.name;
+    const lowerName = fileName.toLowerCase();
+    const isEpub = file.type === "application/epub+zip" || lowerName.endsWith(".epub");
+    const isPdf = file.type === "application/pdf" || lowerName.endsWith(".pdf");
+
+    if (!isEpub && !isPdf) {
       console.log("[UPLOAD] Invalid file type:", file.type);
-      return NextResponse.json({ error: "Invalid file type. Expected EPUB file." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid file type. Expected EPUB or PDF file." }, { status: 400 });
     }
+
+    const bookType = isPdf ? "pdf" : "epub";
+    const mimeType = isPdf ? "application/pdf" : "application/epub+zip";
+    const bucketName = isPdf ? "pdfs" : "epubs";
 
     // Calculate SHA256 hash
     console.log("[UPLOAD] Calculating SHA256 hash...");
@@ -95,17 +105,20 @@ export async function POST(request: NextRequest) {
     // Not a duplicate - create new book
     console.log("[UPLOAD] Creating new book record...");
     const bookId = crypto.randomUUID();
-    const storagePath = `books/${user.id}/${bookId}.epub`;
+    const extension = bookType === "pdf" ? "pdf" : "epub";
+    const storagePath = `books/${user.id}/${bookId}.${extension}`;
     
     // Create book record
     const bookData = {
       id: bookId,
-      title: file.name.replace(/\.epub$/i, ""),
+      title: file.name.replace(/\.(epub|pdf)$/i, ""),
       file_size: file.size,
       file_checksum: hashHex,
       uploaded_by: user.id,
       storage_path: storagePath,
       file_name: file.name,
+      book_type: bookType,
+      mime_type: mimeType,
     };
     
     console.log("[UPLOAD] Inserting book with data:", {
@@ -116,6 +129,7 @@ export async function POST(request: NextRequest) {
       uploaded_by: bookData.uploaded_by,
       storage_path: bookData.storage_path,
       file_name: bookData.file_name,
+      book_type: bookData.book_type,
     });
     
     const { error: bookError } = await supabase
@@ -177,10 +191,10 @@ export async function POST(request: NextRequest) {
 
     // Upload to Supabase Storage
     console.log("[UPLOAD] Uploading to storage:", storagePath);
-    const { error: uploadError } = await supabase.storage
-      .from("epubs")
+    const { error: uploadError } = await serviceSupabase.storage
+      .from(bucketName)
       .upload(storagePath, arrayBuffer, {
-        contentType: "application/epub+zip",
+        contentType: mimeType,
         upsert: false,
       });
 
@@ -209,7 +223,7 @@ export async function POST(request: NextRequest) {
       console.error("[UPLOAD] Error linking book to user:", linkError);
       // Clean up: delete book and storage file
       await supabase.from("books").delete().eq("id", bookId);
-      await supabase.storage.from("epubs").remove([storagePath]);
+      await serviceSupabase.storage.from(bucketName).remove([storagePath]);
       
       return NextResponse.json({ 
         error: "Failed to link book to user",

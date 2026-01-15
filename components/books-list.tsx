@@ -45,12 +45,12 @@ export async function BooksList() {
             Your Books
           </CardTitle>
           <CardDescription>
-            Books you've uploaded or added to your library
+            Books you&apos;ve uploaded or added to your library
           </CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground text-center py-8">
-            No books yet. Upload your first EPUB book to get started!
+            No books yet. Upload your first EPUB or PDF book to get started!
           </p>
         </CardContent>
       </Card>
@@ -102,7 +102,7 @@ export async function BooksList() {
             Your Books
           </CardTitle>
           <CardDescription>
-            Books you've uploaded or added to your library
+            Books you&apos;ve uploaded or added to your library
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -136,9 +136,9 @@ export async function BooksList() {
           <BookOpen className="h-5 w-5" />
           Your Books ({userBooks.length})
         </CardTitle>
-        <CardDescription>
-          Books you've uploaded or added to your library
-        </CardDescription>
+          <CardDescription>
+            Books you&apos;ve uploaded or added to your library
+          </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">

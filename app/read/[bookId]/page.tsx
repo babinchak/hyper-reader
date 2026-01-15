@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { BookReader } from "@/components/book-reader";
+import { PdfReader } from "@/components/pdf-reader";
 
 interface PageProps {
   params: Promise<{ bookId: string }>;
@@ -19,7 +20,7 @@ export default async function ReadBookPage({ params }: PageProps) {
   // Fetch the book to get user_id and verify access
   const { data: book, error: bookError } = await supabase
     .from("books")
-    .select("id, uploaded_by")
+    .select("id, uploaded_by, book_type, storage_path, file_name, title")
     .eq("id", bookId)
     .single();
 
@@ -51,6 +52,38 @@ export default async function ReadBookPage({ params }: PageProps) {
         </div>
       </div>
     );
+  }
+
+  const bookType = book.book_type || "epub";
+
+  if (bookType === "pdf") {
+    if (!book.storage_path) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-2">PDF Not Found</h1>
+            <p className="text-muted-foreground">The PDF file path is missing.</p>
+          </div>
+        </div>
+      );
+    }
+
+    const { data: signedUrl, error: signedError } = await supabase.storage
+      .from("pdfs")
+      .createSignedUrl(book.storage_path, 60 * 10);
+
+    if (signedError || !signedUrl?.signedUrl) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-2">PDF Not Found</h1>
+            <p className="text-muted-foreground">The PDF could not be loaded.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return <PdfReader pdfUrl={signedUrl.signedUrl} fileName={book.file_name || book.title} />;
   }
 
   // Construct the manifest path: books_{user_id}_{book_id}/manifest.json
