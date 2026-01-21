@@ -250,6 +250,7 @@ export function PdfReader({ pdfUrl, fileName }: PdfReaderProps) {
                 if (!positions) return;
                 console.log("Selection start position:", positions.start);
                 console.log("Selection end position:", positions.end);
+                console.log("Selected text:", window.getSelection()?.toString().trim() || "");
               }}
               variant="default"
               className="w-full"
