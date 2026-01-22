@@ -1,3 +1,4 @@
+@import "pdfjs-dist/web/pdf_viewer.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -67,15 +68,4 @@
   }
 }
 
-@layer utilities {
-  .pdf-text-layer {
-    color: rgba(0, 0, 0, 0.01);
-  }
-  .pdf-text-layer span {
-    color: inherit;
-  }
-  .pdf-text-layer ::selection {
-    background: rgba(59, 130, 246, 0.35);
-    color: transparent;
-  }
-}
+@layer utilities {}

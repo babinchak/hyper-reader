@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
+import {
+  GlobalWorkerOptions,
+  PixelsPerInch,
+  getDocument,
+  setLayerDimensions,
+  type PDFDocumentProxy,
+} from "pdfjs-dist";
 import { Button } from "@/components/ui/button";
 import { Bot, ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -13,140 +19,6 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 interface PdfReaderProps {
   pdfUrl: string;
   fileName?: string | null;
-}
-
-interface PdfPageProps {
-  pdf: PDFDocumentProxy;
-  pageNumber: number;
-  scale?: number;
-}
-
-type PdfTextItem = {
-  str?: string;
-  transform?: number[];
-  width?: number;
-};
-
-function multiplyTransforms(m1: number[], m2: number[]) {
-  return [
-    m1[0] * m2[0] + m1[2] * m2[1],
-    m1[1] * m2[0] + m1[3] * m2[1],
-    m1[0] * m2[2] + m1[2] * m2[3],
-    m1[1] * m2[2] + m1[3] * m2[3],
-    m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
-    m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
-  ];
-}
-
-function renderTextLayer(
-  container: HTMLDivElement,
-  textItems: PdfTextItem[],
-  viewport: { width: number; height: number; transform: number[]; scale: number },
-  pageNumber: number
-) {
-  container.innerHTML = "";
-  container.style.width = `${viewport.width}px`;
-  container.style.height = `${viewport.height}px`;
-  container.style.position = "absolute";
-  container.style.inset = "0";
-  container.style.zIndex = "2";
-  container.style.pointerEvents = "auto";
-  container.style.userSelect = "text";
-  container.style.cursor = "text";
-  container.style.color = "";
-  container.style.whiteSpace = "pre";
-
-  textItems.forEach((item, index) => {
-    if (!item.str || !item.transform) return;
-
-    const span = document.createElement("span");
-    span.textContent = item.str;
-    span.dataset.itemIndex = index.toString();
-    span.dataset.pageNumber = pageNumber.toString();
-    span.style.position = "absolute";
-    span.style.transformOrigin = "0% 0%";
-    span.style.whiteSpace = "pre";
-    span.style.cursor = "text";
-    span.style.pointerEvents = "auto";
-    span.style.userSelect = "text";
-    span.style.lineHeight = "1";
-
-    const transform = multiplyTransforms(viewport.transform, item.transform);
-    const angle = Math.atan2(transform[1], transform[0]);
-    const fontHeight = Math.hypot(transform[2], transform[3]);
-    const x = transform[4];
-    const y = transform[5];
-
-    span.style.fontSize = `${fontHeight}px`;
-    span.style.transform = `translate(${x}px, ${y - fontHeight}px) rotate(${angle}rad)`;
-
-    if (item.width && item.str.length > 0) {
-      const scaledWidth = item.width * viewport.scale;
-      span.style.width = `${scaledWidth}px`;
-      span.style.display = "inline-block";
-    }
-
-    container.appendChild(span);
-  });
-}
-
-function PdfPage({ pdf, pageNumber, scale = 1.25 }: PdfPageProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textLayerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let renderTask: { cancel?: () => void } | null = null;
-
-    const render = async () => {
-      const page = await pdf.getPage(pageNumber);
-      if (cancelled || !canvasRef.current || !textLayerRef.current) return;
-
-      const viewport = page.getViewport({ scale });
-      const canvas = canvasRef.current;
-      const textLayer = textLayerRef.current;
-      const context = canvas.getContext("2d");
-      if (!context) return;
-
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      renderTask = page.render({ canvasContext: context, viewport });
-      await renderTask.promise;
-
-      const textContent = await page.getTextContent();
-      if (cancelled) return;
-      renderTextLayer(
-        textLayer,
-        textContent.items as PdfTextItem[],
-        {
-          width: viewport.width,
-          height: viewport.height,
-          transform: viewport.transform,
-          scale: viewport.scale,
-        },
-        pageNumber
-      );
-    };
-
-    render().catch(() => {
-      // noop: error handled by parent
-    });
-
-    return () => {
-      cancelled = true;
-      if (renderTask?.cancel) renderTask.cancel();
-    };
-  }, [pdf, pageNumber, scale]);
-
-  return (
-    <div className="w-full flex justify-center">
-      <div className="relative shadow-sm border bg-white">
-        <canvas ref={canvasRef} className="pointer-events-none block" />
-        <div ref={textLayerRef} className="absolute inset-0 select-text cursor-text pdf-text-layer" />
-      </div>
-    </div>
-  );
 }
 
 export function PdfReader({ pdfUrl, fileName }: PdfReaderProps) {
@@ -259,6 +131,96 @@ export function PdfReader({ pdfUrl, fileName }: PdfReaderProps) {
             </Button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+interface PdfPageProps {
+  pdf: PDFDocumentProxy;
+  pageNumber: number;
+  scale?: number;
+}
+
+function PdfPage({ pdf, pageNumber, scale = 1.25 }: PdfPageProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textLayerHostRef = useRef<HTMLDivElement | null>(null);
+  const pageContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: { cancel?: () => void } | null = null;
+    let textLayerBuilder: { cancel?: () => void } | null = null;
+
+    const render = async () => {
+      const page = await pdf.getPage(pageNumber);
+      if (
+        cancelled ||
+        !canvasRef.current ||
+        !textLayerHostRef.current ||
+        !pageContainerRef.current
+      ) {
+        return;
+      }
+
+      const viewport = page.getViewport({ scale: scale * PixelsPerInch.PDF_TO_CSS_UNITS });
+      const outputScale = window.devicePixelRatio || 1;
+
+      pageContainerRef.current.style.setProperty("--scale-factor", viewport.scale.toString());
+      setLayerDimensions(pageContainerRef.current, viewport);
+
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+
+      const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined;
+      renderTask = page.render({ canvasContext: context, viewport, transform });
+      await renderTask.promise;
+
+      const { TextLayerBuilder } = await import("pdfjs-dist/web/pdf_viewer.mjs");
+      if (cancelled) return;
+
+      const textLayerHost = textLayerHostRef.current;
+      textLayerHost.innerHTML = "";
+      textLayerHost.style.setProperty("--scale-factor", viewport.scale.toString());
+      setLayerDimensions(textLayerHost, viewport);
+
+      textLayerBuilder = new TextLayerBuilder({
+        pdfPage: page,
+        onAppend: (div: HTMLDivElement) => {
+          const textNodes = Array.from(div.querySelectorAll("span"));
+          textNodes.forEach((node, index) => {
+            node.dataset.itemIndex = index.toString();
+            node.dataset.pageNumber = pageNumber.toString();
+          });
+          textLayerHost.appendChild(div);
+        },
+      });
+
+      await textLayerBuilder.render(viewport);
+    };
+
+    render().catch(() => {
+      // noop: error handled by parent
+    });
+
+    return () => {
+      cancelled = true;
+      if (renderTask?.cancel) renderTask.cancel();
+      textLayerBuilder?.cancel?.();
+    };
+  }, [pdf, pageNumber, scale]);
+
+  return (
+    <div className="w-full flex justify-center">
+      <div ref={pageContainerRef} className="relative shadow-sm border bg-white">
+        <canvas ref={canvasRef} className="pointer-events-none block" />
+        <div ref={textLayerHostRef} className="absolute inset-0" />
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ interface PdfSpanInfo {
   charOffset: number;
 }
 
-const SPAN_SELECTOR = "span[data-item-index][data-page-number]";
+const SPAN_SELECTOR = "[data-item-index][data-page-number]";
 
 function formatPdfPosition(info: PdfSpanInfo): string {
   return `${info.pageNumber}:${info.itemIndex}:${info.charOffset}`;
