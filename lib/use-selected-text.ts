@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { getSelectedText } from "@/lib/book-position-utils";
+import { captureSelection } from "@/lib/book-position-utils";
 
 export function useSelectedText(): string {
   const [selectedText, setSelectedText] = useState("");
 
   useEffect(() => {
     const handleSelection = () => {
-      setSelectedText(getSelectedText());
+      setSelectedText(captureSelection());
     };
 
     document.addEventListener("selectionchange", handleSelection);
