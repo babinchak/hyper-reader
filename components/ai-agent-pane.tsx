@@ -12,6 +12,7 @@ import {
   getSelectedText,
 } from "@/lib/book-position-utils";
 import { getCurrentPdfSelectionPosition } from "@/lib/pdf-position/selection-position";
+import { getCurrentPdfPageContext } from "@/lib/pdf-position/page-context";
 import { queryPdfSummariesForPosition } from "@/lib/pdf-position/summaries";
 import { getPdfLocalContextAroundCurrentSelection } from "@/lib/pdf-position/local-context";
 
@@ -236,7 +237,10 @@ export function AIAgentPane({
     // Get current selection text directly (don't rely on prop which might be stale)
     const currentSelectedText = getSelectedText();
 
-    if (!currentSelectedText) {
+    const isExplainPdfPage =
+      isPdf && (!currentSelectedText || currentSelectedText.trim().length === 0);
+
+    if (!currentSelectedText && !isExplainPdfPage) {
       return;
     }
 
@@ -246,23 +250,56 @@ export function AIAgentPane({
     let summaries: SummaryContext[] = [];
     let selectionPositionLabel: string | undefined;
     let selectionPositionTitle: string | undefined;
+    let explainUserMessage = "Explain text";
+    let explainBodyText = currentSelectedText;
     if (isPdf) {
-      const position = getCurrentPdfSelectionPosition();
-      if (!position) {
-        setIsLoading(false);
-        return;
-      }
-      const formatted = formatSelectionPositionLabel(position.start, position.end);
-      selectionPositionLabel = formatted.label;
-      selectionPositionTitle = formatted.title;
-      summaries = (await queryPdfSummariesForPosition(bookId, position.start, position.end)).map(
-        ({ summary_type, toc_title, chapter_path, summary_text }) => ({
+      if (isExplainPdfPage) {
+        const page = getCurrentPdfPageContext({ maxChars: 30000 });
+        if (!page || !page.text) {
+          setIsLoading(false);
+          return;
+        }
+        explainUserMessage = "Explain page";
+        explainBodyText = page.text;
+        selectionPositionLabel = `(Page ${page.pageNumber})`;
+        selectionPositionTitle = `start=${page.startPosition} end=${page.endPosition}`;
+        summaries = (
+          await queryPdfSummariesForPosition(
+            bookId,
+            page.startPosition,
+            page.endPosition
+          )
+        ).map(({ summary_type, toc_title, chapter_path, summary_text }) => ({
           summary_type,
           toc_title,
           chapter_path,
           summary_text,
-        })
-      );
+        }));
+      } else {
+        const position = getCurrentPdfSelectionPosition();
+        if (!position) {
+          setIsLoading(false);
+          return;
+        }
+        const formatted = formatSelectionPositionLabel(
+          position.start,
+          position.end
+        );
+        selectionPositionLabel = formatted.label;
+        selectionPositionTitle = formatted.title;
+        summaries = (
+          await queryPdfSummariesForPosition(
+            bookId,
+            position.start,
+            position.end
+          )
+        ).map(({ summary_type, toc_title, chapter_path, summary_text }) => ({
+          summary_type,
+          toc_title,
+          chapter_path,
+          summary_text,
+        }));
+      }
     } else {
       const readingOrder = rawManifest?.readingOrder || [];
       const position = getCurrentSelectionPosition(readingOrder, null);
@@ -321,7 +358,7 @@ export function AIAgentPane({
     appendSummaries("More specific summary (narrow context)", narrowSummaries);
 
     // Add local PDF context window around selection (best-effort)
-    if (isPdf) {
+    if (isPdf && !isExplainPdfPage) {
       const local = getPdfLocalContextAroundCurrentSelection({
         beforeChars: 800,
         afterChars: 800,
@@ -340,14 +377,16 @@ export function AIAgentPane({
     }
 
     // Add the selected text and instruction
-    prompt += `Please explain the following selected text from the book:\n\n"${currentSelectedText}"\n\nProvide a clear and helpful explanation of this text in the context of the book.`;
+    prompt += `Please explain the following ${
+      isExplainPdfPage ? "page" : "selected text"
+    } from the book:\n\n"${explainBodyText}"\n\nProvide a clear and helpful explanation in the context of the book.`;
 
 
     // Add user message (just "Explain text" for display)
     const userMessage: AIMessage = {
       id: Date.now().toString(),
       role: "user",
-      content: "Explain text",
+      content: explainUserMessage,
       timestamp: new Date(),
       selectionPositionLabel,
       selectionPositionTitle,
@@ -481,14 +520,19 @@ export function AIAgentPane({
       {/* Input */}
       <div className="p-4 border-t border-border">
         {/* Explain Selection Button */}
-        {selectedText && bookId && (rawManifest || bookType === "pdf") && (
+        {bookId && (rawManifest || bookType === "pdf") && (
           <Button
             onClick={handleExplainSelection}
-            disabled={isLoading || !selectedText.trim()}
+            disabled={
+              isLoading ||
+              (bookType !== "pdf" && (!selectedText || !selectedText.trim()))
+            }
             className="w-full mb-2 text-foreground"
             variant="outline"
           >
-            Explain selection
+            {bookType === "pdf" && (!selectedText || !selectedText.trim())
+              ? "Explain page"
+              : "Explain selection"}
           </Button>
         )}
         <div className="flex gap-2">
