@@ -13,6 +13,7 @@ import {
 } from "@/lib/book-position-utils";
 import { getCurrentPdfSelectionPosition } from "@/lib/pdf-position/selection-position";
 import { queryPdfSummariesForPosition } from "@/lib/pdf-position/summaries";
+import { getPdfLocalContextAroundCurrentSelection } from "@/lib/pdf-position/local-context";
 
 interface AIMessage {
   id: string;
@@ -264,34 +265,45 @@ export function AIAgentPane({
     }
 
     const bookSummaries = summaries.filter((summary) => summary.summary_type === "book");
-    const chapterSummaries = summaries.filter((summary) => summary.summary_type !== "book");
+    const broadSummaries = summaries.filter((summary) => summary.summary_type === "chapter");
+    const narrowSummaries = summaries.filter((summary) => summary.summary_type === "subchapter");
 
-    if (bookSummaries.length > 0) {
-      prompt += "Book Summary:\n";
-      bookSummaries.forEach((summary) => {
+    const appendSummaries = (label: string, items: SummaryContext[]) => {
+      if (items.length === 0) return;
+      prompt += `${label}:\n`;
+      items.forEach((summary) => {
         if (summary.summary_text) {
-          prompt += `${summary.summary_text}\n`;
+          prompt += `- ${summary.summary_text}\n`;
         } else {
-          prompt += `(No summary text available)\n`;
+          prompt += `- (No summary text available)\n`;
         }
       });
       prompt += "\n";
-    }
+    };
 
-    // Add chapter summaries (if any)
-    if (chapterSummaries.length > 0) {
-      prompt += "Chapter Summaries:\n";
-      chapterSummaries.forEach((summary) => {
-        const chapterTitle = summary.toc_title || "Untitled";
-        const chapterPath = summary.chapter_path || "Unknown";
-        prompt += `\n${chapterPath} - ${chapterTitle}:\n`;
-        if (summary.summary_text) {
-          prompt += `${summary.summary_text}\n`;
-        } else {
-          prompt += `(No summary text available)\n`;
-        }
+    // Note: we intentionally avoid chapter numbers/titles/paths here.
+    // They can be wrong/noisy and confuse the model.
+    appendSummaries("Book-level summary (highest-level context)", bookSummaries);
+    appendSummaries("Broader summary (wide context)", broadSummaries);
+    appendSummaries("More specific summary (narrow context)", narrowSummaries);
+
+    // Add local PDF context window around selection (best-effort)
+    if (isPdf) {
+      const local = getPdfLocalContextAroundCurrentSelection({
+        beforeChars: 800,
+        afterChars: 800,
+        maxTotalChars: 2400,
       });
-      prompt += "\n";
+      if (local && (local.beforeText || local.afterText)) {
+        prompt += "Local context around the selection (PDF text near where it appears on the page):\n\n";
+        if (local.beforeText) {
+          prompt += `Before:\n"${local.beforeText}"\n\n`;
+        }
+        prompt += `Selected:\n"${local.selectedText}"\n\n`;
+        if (local.afterText) {
+          prompt += `After:\n"${local.afterText}"\n\n`;
+        }
+      }
     }
 
     // Add the selected text and instruction

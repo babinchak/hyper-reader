@@ -10,6 +10,18 @@ type IncomingChatMessage = {
   content: string;
 };
 
+function shouldLogAiPrompts(): boolean {
+  const v = process.env.LOG_AI_PROMPTS;
+  if (!v) return false;
+  return v === "1" || v.toLowerCase() === "true" || v.toLowerCase() === "yes";
+}
+
+function truncateForLog(text: string, maxChars: number): string {
+  if (maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n... [truncated ${text.length - maxChars} chars]`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.OPENAI_API_KEY) {
@@ -49,6 +61,30 @@ export async function POST(req: NextRequest) {
 
     // Get model from environment variable, default to gpt-4o-mini
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+    if (shouldLogAiPrompts()) {
+      const maxCharsPerMessage = Number.parseInt(
+        process.env.LOG_AI_PROMPTS_MAX_CHARS_PER_MESSAGE || "6000",
+        10
+      );
+      const safeMax = Number.isFinite(maxCharsPerMessage) ? Math.max(0, maxCharsPerMessage) : 6000;
+
+      console.log("[ai] Outgoing chat request", {
+        model,
+        messageCount: openaiMessages.length,
+      });
+
+      openaiMessages.forEach((m, idx) => {
+        const role = "role" in m ? (m.role as string) : "unknown";
+        const content =
+          typeof (m as { content?: unknown }).content === "string"
+            ? ((m as { content: string }).content ?? "")
+            : JSON.stringify((m as { content?: unknown }).content ?? "");
+        console.log(
+          `[ai] message[${idx}] role=${role}\n${truncateForLog(content, safeMax)}`
+        );
+      });
+    }
 
     // Create a streaming response
     const stream = await openai.chat.completions.create({
