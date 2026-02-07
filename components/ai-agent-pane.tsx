@@ -20,6 +20,8 @@ interface AIMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  selectionPositionLabel?: string;
+  selectionPositionTitle?: string;
 }
 
 interface AIAgentPaneProps {
@@ -59,6 +61,29 @@ export function AIAgentPane({
   const [bookTitle, setBookTitle] = useState<string>("");
   const [bookAuthor, setBookAuthor] = useState<string>("");
   const supabase = createClient();
+
+  const formatSelectionPositionLabel = (start: string, end: string): { label: string; title: string } => {
+    const parseThreePart = (pos: string): { a: number; b: number; c: number } | null => {
+      const parts = pos.split(/[/:]/).map((p) => parseInt(p, 10));
+      if (parts.length < 3 || parts.some((v) => Number.isNaN(v))) return null;
+      return { a: parts[0], b: parts[1], c: parts[2] };
+    };
+
+    // PDF positions look like: page/itemIndex/charOffset (we display page:itemIndex).
+    const start3 = parseThreePart(start);
+    const end3 = parseThreePart(end);
+    if (start3 && end3) {
+      const label = `(${start3.a}:${start3.b}-${end3.a}:${end3.b})`;
+      const title = `start=${start} end=${end}`;
+      return { label, title };
+    }
+
+    // EPUB positions look like: readingOrderIndex/path/charOffset (we keep it, but make it compact-ish).
+    const compact = (pos: string) => pos.replaceAll("/", ":");
+    const label = `(${compact(start)}-${compact(end)})`;
+    const title = `start=${start} end=${end}`;
+    return { label, title };
+  };
 
   // Helper function to handle streaming response
   const handleStreamingResponse = async (
@@ -219,12 +244,17 @@ export function AIAgentPane({
     setIsLoading(true);
 
     let summaries: SummaryContext[] = [];
+    let selectionPositionLabel: string | undefined;
+    let selectionPositionTitle: string | undefined;
     if (isPdf) {
       const position = getCurrentPdfSelectionPosition();
       if (!position) {
         setIsLoading(false);
         return;
       }
+      const formatted = formatSelectionPositionLabel(position.start, position.end);
+      selectionPositionLabel = formatted.label;
+      selectionPositionTitle = formatted.title;
       summaries = (await queryPdfSummariesForPosition(bookId, position.start, position.end)).map(
         ({ summary_type, toc_title, chapter_path, summary_text }) => ({
           summary_type,
@@ -240,6 +270,9 @@ export function AIAgentPane({
         setIsLoading(false);
         return;
       }
+      const formatted = formatSelectionPositionLabel(position.start, position.end);
+      selectionPositionLabel = formatted.label;
+      selectionPositionTitle = formatted.title;
       summaries = (await querySummariesForPosition(bookId, position.start, position.end)).map(
         ({ toc_title, chapter_path, summary_text }) => ({
           summary_type: "chapter",
@@ -316,6 +349,8 @@ export function AIAgentPane({
       role: "user",
       content: "Explain text",
       timestamp: new Date(),
+      selectionPositionLabel,
+      selectionPositionTitle,
     };
     setMessages((prev) => [...prev, userMessage]);
 
@@ -413,12 +448,20 @@ export function AIAgentPane({
               }`}
             >
               <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-              <p className="text-xs opacity-70 mt-1">
-                {message.timestamp.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </p>
+              {message.selectionPositionLabel && (
+                <div className="mt-2">
+                  <span
+                    title={message.selectionPositionTitle}
+                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                      message.role === "user"
+                        ? "text-primary-foreground/80"
+                        : "text-foreground/80"
+                    } border-blue-500/40 bg-blue-500/10 dark:border-blue-400/40 dark:bg-blue-400/10`}
+                  >
+                    {message.selectionPositionLabel}
+                  </span>
+                </div>
+              )}
             </Card>
           </div>
         ))}
