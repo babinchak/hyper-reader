@@ -50,6 +50,8 @@ export async function updateSession(request: NextRequest) {
   if (
     request.nextUrl.pathname !== "/" &&
     !user &&
+    // Allow dev-only smoke test endpoint without auth
+    !(process.env.NODE_ENV !== "production" && request.nextUrl.pathname.startsWith("/api/langsmith-smoke")) &&
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth")
   ) {

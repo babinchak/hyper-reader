@@ -30,7 +30,9 @@ export default async function ReadBookPage({ params }: PageProps) {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold mb-2">Book Not Found</h1>
-          <p className="text-muted-foreground">The book you're looking for doesn't exist.</p>
+          <p className="text-muted-foreground">
+            The book you&apos;re looking for doesn&apos;t exist.
+          </p>
         </div>
       </div>
     );
@@ -49,7 +51,7 @@ export default async function ReadBookPage({ params }: PageProps) {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold mb-2">Access Denied</h1>
-          <p className="text-muted-foreground">You don't have access to this book.</p>
+          <p className="text-muted-foreground">You don&apos;t have access to this book.</p>
         </div>
       </div>
     );
@@ -122,7 +124,7 @@ export default async function ReadBookPage({ params }: PageProps) {
   let manifest;
   try {
     manifest = JSON.parse(manifestText);
-  } catch (parseError) {
+  } catch {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -135,7 +137,7 @@ export default async function ReadBookPage({ params }: PageProps) {
 
   // Extract the self href from the manifest, or construct it if missing
   const selfLink = manifest.links?.find(
-    (link: any) => link.rel === "self"
+    (link: { rel?: string; href?: string }) => link.rel === "self"
   );
   let selfHref = selfLink?.href || "";
   
