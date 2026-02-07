@@ -39,10 +39,12 @@
     "react-aria": "^3.45.0",
     "react-aria-components": "^1.14.0",
     "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
     "react-modal-sheet": "^5.2.1",
     "react-redux": "^9.2.0",
     "react-resizable-panels": "^4.2.0",
     "react-stately": "^3.43.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.3.0",
     "zod": "^4.3.6"
   },

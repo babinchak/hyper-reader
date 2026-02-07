@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { X, Send, Bot } from "lucide-react";
+import { Markdown } from "@/components/markdown";
 import { createClient } from "@/lib/supabase/client";
 import {
   getCurrentSelectionPosition,
@@ -444,7 +445,7 @@ export function AIAgentPane({
   return (
     <div
       data-ai-pane="true"
-      className="fixed right-0 top-0 h-full w-96 bg-background border-l border-border shadow-lg flex flex-col z-50"
+      className="fixed right-0 top-0 h-full w-96 bg-background border-l border-border shadow-lg flex flex-col z-50 select-text"
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border">
@@ -483,10 +484,16 @@ export function AIAgentPane({
               className={`max-w-[80%] p-3 ${
                 message.role === "user"
                   ? "bg-primary text-primary-foreground"
-                  : "bg-muted"
+                  : "bg-muted text-foreground select-text"
               }`}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              {message.role === "assistant" ? (
+                <Markdown content={message.content} />
+              ) : (
+                <p className="text-sm whitespace-pre-wrap break-words">
+                  {message.content}
+                </p>
+              )}
               {message.selectionPositionLabel && (
                 <div className="mt-2">
                   <span

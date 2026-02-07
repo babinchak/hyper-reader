@@ -69,3 +69,16 @@
 }
 
 @layer utilities {}
+
+@layer base {
+  /* Make text selection clearly visible inside the AI pane (both themes). */
+  [data-ai-pane="true"] ::selection {
+    /* Use a familiar "system-like" blue highlight. */
+    background: rgb(37 99 235 / 0.35); /* ~blue-600 */
+    color: rgb(255 255 255);
+  }
+  [data-ai-pane="true"] ::-moz-selection {
+    background: rgb(37 99 235 / 0.35);
+    color: rgb(255 255 255);
+  }
+}

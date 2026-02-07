@@ -10,6 +10,15 @@ type IncomingChatMessage = {
   content: string;
 };
 
+const MARKDOWN_SYSTEM_PROMPT =
+  "You are a helpful reading assistant. Respond using GitHub-flavored Markdown (GFM).\n" +
+  "- Use headings, bullet lists, and tables when helpful.\n" +
+  "- Use short section headings (e.g. ###) to break up the answer.\n" +
+  "- Bold the key terms and the most meaningful phrases.\n" +
+  "- Use fenced code blocks with a language tag for code.\n" +
+  "- Do NOT wrap the entire response in a single code block.\n" +
+  "- Avoid raw HTML; prefer Markdown.\n";
+
 function shouldLogAiPrompts(): boolean {
   const v = process.env.LOG_AI_PROMPTS;
   if (!v) return false;
@@ -47,7 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Convert messages to OpenAI format
-    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = (
+    const openaiMessagesFromClient: OpenAI.Chat.ChatCompletionMessageParam[] = (
       messages as IncomingChatMessage[]
     ).map((msg) => ({
       role:
@@ -58,6 +67,12 @@ export async function POST(req: NextRequest) {
             : "user",
       content: String(msg.content ?? ""),
     }));
+
+    // Always enforce Markdown-capable output (ChatGPT-like formatting).
+    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: "system", content: MARKDOWN_SYSTEM_PROMPT },
+      ...openaiMessagesFromClient,
+    ];
 
     // Get model from environment variable, default to gpt-4o-mini
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";

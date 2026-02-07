@@ -13,6 +13,12 @@ function isInAIPane(node: Node | null): boolean {
   return Boolean(element?.closest("[data-ai-pane='true']"));
 }
 
+export function isCurrentSelectionInAIPane(): boolean {
+  const selection = window.getSelection();
+  if (!selection) return false;
+  return isInAIPane(selection.anchorNode) || isInAIPane(selection.focusNode);
+}
+
 // Utility function to get text selection from main document or iframe
 export function getTextSelection(): TextSelectionResult | null {
   // Try to get selection from the main document first
