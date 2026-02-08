@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from "react";
 
+// Phones in landscape can exceed width breakpoints. Prefer capability-based detection
+// so touch-first devices keep "mobile" behavior regardless of orientation.
+export const DEFAULT_MOBILE_QUERY =
+  "(hover: none) and (pointer: coarse), (any-hover: none) and (any-pointer: coarse), (max-width: 767px)";
+
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -25,3 +30,6 @@ export function useMediaQuery(query: string): boolean {
   return matches;
 }
 
+export function useIsMobile(): boolean {
+  return useMediaQuery(DEFAULT_MOBILE_QUERY);
+}

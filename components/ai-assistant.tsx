@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { AIRail } from "@/components/ai-rail";
 import { AIBottomDrawer } from "@/components/ai-bottom-drawer";
 import { AIAgentPanel } from "@/components/ai-agent-pane";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { useIsMobile } from "@/lib/use-media-query";
 
 export interface AIAssistantProps {
   selectedText?: string;
@@ -19,7 +19,7 @@ function clamp(n: number, min: number, max: number) {
 }
 
 export function AIAssistant(props: AIAssistantProps) {
-  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isMobile = useIsMobile();
   if (isMobile) {
     return (
       <AIBottomDrawer

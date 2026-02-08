@@ -9,7 +9,7 @@ import { getCurrentPdfSelectionPosition } from "@/lib/pdf-position/selection-pos
 import { queryPdfSummariesForPosition } from "@/lib/pdf-position/summaries";
 import { AIAssistant } from "@/components/ai-assistant";
 import { useSelectedText } from "@/lib/use-selected-text";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { useIsMobile } from "@/lib/use-media-query";
 
 type PDFDocumentLoadingTask = {
   promise: Promise<PDFDocumentProxy>;
@@ -34,7 +34,7 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
   const selectedText = useSelectedText();
   const selectionExists = Boolean(selectedText && selectedText.trim().length > 0);
   const router = useRouter();
-  const isMobile = useMediaQuery("(max-width: 767px)");
+  const isMobile = useIsMobile();
   const [chromeVisible, setChromeVisible] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
