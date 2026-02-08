@@ -49,7 +49,7 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
 
   // iOS safe-area can be zero in some contexts; keep a sensible fallback.
   // Lower fallback = slightly higher top bar when `env()` reports 0.
-  const mobileSafeTop = "max(env(safe-area-inset-top), 32px)";
+  const mobileSafeTop = "max(env(safe-area-inset-top), 0px)";
 
   useEffect(() => {
     let cancelled = false;
