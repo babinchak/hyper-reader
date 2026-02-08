@@ -11,6 +11,7 @@ export interface AIAssistantProps {
   bookId?: string;
   rawManifest?: { readingOrder?: Array<{ href?: string }> };
   bookType: "epub" | "pdf";
+  mobileDrawerMinMode?: "closed" | "quick";
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -26,6 +27,7 @@ export function AIAssistant(props: AIAssistantProps) {
         bookId={props.bookId}
         rawManifest={props.rawManifest}
         bookType={props.bookType}
+        minMode={props.mobileDrawerMinMode}
       />
     );
   }

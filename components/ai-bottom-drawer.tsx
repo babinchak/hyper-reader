@@ -20,6 +20,11 @@ export interface AIBottomDrawerProps
    * Optional initial mode (mostly for debugging).
    */
   initialMode?: MobileDrawerMode;
+  /**
+   * Prevent the drawer from being fully closed (useful for "peek" UIs).
+   * Defaults to "closed".
+   */
+  minMode?: Extract<MobileDrawerMode, "closed" | "quick">;
 }
 
 function clamp(n: number, min: number, max: number) {
@@ -29,12 +34,14 @@ function clamp(n: number, min: number, max: number) {
 export function AIBottomDrawer({
   selectedText,
   initialMode,
+  minMode = "closed",
   ...panelProps
 }: AIBottomDrawerProps) {
   const selectionExists = Boolean(selectedText && selectedText.trim().length > 0);
 
   const [mode, setMode] = useState<MobileDrawerMode>(() => {
     if (initialMode) return initialMode;
+    if (minMode === "quick") return "quick";
     return selectionExists ? "quick" : "closed";
   });
 
@@ -42,10 +49,10 @@ export function AIBottomDrawer({
   useEffect(() => {
     setMode((prev) => {
       if (selectionExists && prev === "closed") return "quick";
-      if (!selectionExists && prev === "quick") return "closed";
+      if (!selectionExists && prev === "quick") return minMode === "quick" ? "quick" : "closed";
       return prev;
     });
-  }, [selectionExists]);
+  }, [minMode, selectionExists]);
 
   const handleHeight = 24;
   const quickHeight = 168;
@@ -97,7 +104,10 @@ export function AIBottomDrawer({
     const full = Math.round(vh * 0.9);
 
     const candidates: Array<{ mode: MobileDrawerMode; height: number }> = [
-      { mode: selectionExists ? "quick" : "closed", height: selectionExists ? quickHeight : handleHeight },
+      {
+        mode: selectionExists || minMode === "quick" ? "quick" : "closed",
+        height: selectionExists || minMode === "quick" ? quickHeight : handleHeight,
+      },
       { mode: "half", height: half },
       { mode: "full", height: full },
     ];
@@ -133,7 +143,7 @@ export function AIBottomDrawer({
     snapToMode(heightPx);
   };
 
-  const close = () => setMode(selectionExists ? "quick" : "closed");
+  const close = () => setMode(selectionExists || minMode === "quick" ? "quick" : "closed");
 
   const showBackdrop = mode === "half" || mode === "full";
 
