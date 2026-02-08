@@ -47,6 +47,10 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
     if (isMobile) setIsDebugPanelOpen(false);
   }, [isMobile]);
 
+  // iOS safe-area can be zero in some contexts; keep a sensible fallback.
+  // Lower fallback = slightly higher top bar when `env()` reports 0.
+  const mobileSafeTop = "max(env(safe-area-inset-top), 32px)";
+
   useEffect(() => {
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | null = null;
@@ -129,27 +133,44 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex flex-col h-full relative">
           {(!isMobile || chromeVisible) && (
-            <div
-              className={[
-                "flex items-center justify-between px-4 py-3 border-b bg-background text-white",
-                // On mobile, overlay instead of docking (avoid reflow/layout shift).
-                isMobile ? "absolute top-0 left-0 right-0 z-40 border-b/60 bg-background/90 backdrop-blur" : "",
-              ].join(" ")}
-            >
-              <div className="min-w-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="mb-2 -ml-2 text-white hover:text-white"
-                  onClick={() => router.back()}
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back
-                </Button>
-                <h1 className="font-semibold truncate">{fileName || "PDF Document"}</h1>
-                <p className="text-xs text-white/70">{pdfDoc.numPages} pages</p>
+            <>
+              {isMobile && (
+                // Background "sheet" that fills the notch/safe-area region too,
+                // while keeping the interactive bar content below it.
+                <div
+                  className="absolute top-0 left-0 right-0 z-50 border-b/60 bg-background/90 backdrop-blur pointer-events-none"
+                  style={{ paddingTop: mobileSafeTop }}
+                />
+              )}
+              <div
+                className={[
+                  "flex items-center justify-between px-4 border-b bg-background text-white pointer-events-auto",
+                  // On mobile, overlay instead of docking (avoid reflow/layout shift).
+                  isMobile
+                    ? "absolute left-0 right-0 z-50 border-b/60 bg-background/90 backdrop-blur py-2"
+                    : "py-2",
+                ].join(" ")}
+                style={isMobile ? { top: mobileSafeTop } : undefined}
+              >
+                <div className="min-w-0 flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="-ml-2 text-white hover:text-white shrink-0"
+                    onClick={() => router.back()}
+                    aria-label="Back"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </Button>
+                  <div className="min-w-0">
+                    <h1 className="font-semibold truncate leading-tight">
+                      {fileName || "PDF Document"}
+                    </h1>
+                    <p className="text-xs text-white/70 leading-tight">{pdfDoc.numPages} pages</p>
+                  </div>
+                </div>
               </div>
-            </div>
+            </>
           )}
           <div
             className="flex-1 overflow-auto bg-muted/20"
@@ -319,11 +340,16 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const zoomLayerRef = useRef<HTMLDivElement | null>(null);
 
+  const MIN_ZOOM = 0.7; // allow "over-zoom out" while pinching
+  const MAX_ZOOM = 4;
+  const SNAP_BACK_THRESHOLD = 1.08; // snap back to min zoom on release near 1x
+
   const [view, setView] = useState<{ scale: number; x: number; y: number }>(() => ({
     scale: 1,
     x: 0,
     y: 0,
   }));
+  const [isInteracting, setIsInteracting] = useState(false);
 
   const pointersRef = useRef(new Map<number, { x: number; y: number }>());
   const gestureStartRef = useRef<{
@@ -341,7 +367,12 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
     const h = host.clientHeight || 0;
     if (w <= 0 || h <= 0) return next;
 
-    if (next.scale <= 1) return { scale: 1, x: 0, y: 0 };
+    // When zoomed out below 1x (only allowed during pinch), keep the page centered.
+    if (next.scale < 1) {
+      const cx = (w - w * next.scale) / 2;
+      const cy = (h - h * next.scale) / 2;
+      return { scale: next.scale, x: cx, y: cy };
+    }
 
     const minX = w - w * next.scale;
     const minY = h - h * next.scale;
@@ -460,14 +491,24 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
     };
   }, []);
 
+  const toLocal = (clientX: number, clientY: number) => {
+    const host = pageContainerRef.current;
+    if (!host) return { x: clientX, y: clientY };
+    const rect = host.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
 
-    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    setIsInteracting(true);
+
+    const p = toLocal(e.clientX, e.clientY);
+    pointersRef.current.set(e.pointerId, p);
 
     if (pointersRef.current.size === 1) {
-      panRef.current = { pointerId: e.pointerId, lastX: e.clientX, lastY: e.clientY };
+      panRef.current = { pointerId: e.pointerId, lastX: p.x, lastY: p.y };
     }
 
     if (pointersRef.current.size === 2) {
@@ -487,7 +528,8 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!pointersRef.current.has(e.pointerId)) return;
-    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = toLocal(e.clientX, e.clientY);
+    pointersRef.current.set(e.pointerId, p);
 
     // Pinch zoom (two pointers)
     if (pointersRef.current.size === 2 && gestureStartRef.current) {
@@ -499,7 +541,7 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
 
       const start = gestureStartRef.current;
       const rawScale = start.startScale * (dist / start.startDist);
-      const nextScale = clamp(rawScale, 1, 4);
+      const nextScale = clamp(rawScale, MIN_ZOOM, MAX_ZOOM);
 
       // Keep the midpoint stable while scaling with transformOrigin 0 0:
       // x1 = m - (m - x0)/s0 * s1
@@ -515,9 +557,9 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
     if (!pan || pan.pointerId !== e.pointerId) return;
     if (view.scale <= 1) return;
 
-    const dx = e.clientX - pan.lastX;
-    const dy = e.clientY - pan.lastY;
-    panRef.current = { ...pan, lastX: e.clientX, lastY: e.clientY };
+    const dx = p.x - pan.lastX;
+    const dy = p.y - pan.lastY;
+    panRef.current = { ...pan, lastX: p.x, lastY: p.y };
 
     setView((prev) => clampToBounds({ ...prev, x: prev.x + dx, y: prev.y + dy }));
   };
@@ -532,8 +574,12 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
         panRef.current = { pointerId: remaining[0], lastX: remaining[1].x, lastY: remaining[1].y };
       }
     }
-    // Snap fully out if user pinched back near 1x.
-    setView((prev) => (prev.scale < 1.02 ? { scale: 1, x: 0, y: 0 } : clampToBounds(prev)));
+    setIsInteracting(pointersRef.current.size > 0);
+
+    // Snap back to the minimum zoom (fit) if the user ends near it (or below it).
+    setView((prev) =>
+      prev.scale < SNAP_BACK_THRESHOLD ? { scale: 1, x: 0, y: 0 } : clampToBounds(prev),
+    );
   };
 
   return (
@@ -545,8 +591,9 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
           style={{
             transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
             transformOrigin: "0 0",
+            transition: isInteracting ? "none" : "transform 160ms ease-out",
             // Allow normal one-finger scroll when not zoomed.
-            touchAction: view.scale > 1 ? "none" : "pan-y",
+            touchAction: view.scale !== 1 ? "none" : "pan-y",
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
