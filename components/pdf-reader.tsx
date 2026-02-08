@@ -36,6 +36,47 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
   const router = useRouter();
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [chromeVisible, setChromeVisible] = useState(true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+
+  // Global PDF zoom (applies to ALL pages by re-rendering at a larger viewport scale).
+  // This avoids per-page transforms that can cause "chopped" edges and makes scroll work naturally.
+  const MIN_RENDER_SCALE = 0.7;
+  const MAX_RENDER_SCALE = 4;
+  const [renderScale, setRenderScale] = useState(1);
+  const [gesture, setGesture] = useState<{ active: boolean; scale: number; tx: number; ty: number }>({
+    active: false,
+    scale: 1,
+    tx: 0,
+    ty: 0,
+  });
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchStartRef = useRef<
+    | {
+        startRenderScale: number;
+        startDist: number;
+        anchorX: number;
+        anchorY: number;
+        scrollLeft: number;
+        scrollTop: number;
+        scrollRectLeft: number;
+        scrollRectTop: number;
+        lastMidOffsetX: number;
+        lastMidOffsetY: number;
+      }
+    | null
+  >(null);
+  const lastCombinedScaleRef = useRef<number>(1);
+  const pendingScrollAdjustRef = useRef<
+    | {
+        anchorX: number;
+        anchorY: number;
+        midOffsetX: number;
+        midOffsetY: number;
+        ratio: number;
+      }
+    | null
+  >(null);
   const tapRef = useRef<{ pointerId: number; x: number; y: number; t: number; moved: boolean } | null>(
     null,
   );
@@ -84,7 +125,7 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
       let pdf: PDFDocumentProxy;
       try {
         pdf = await tryLoad({ ...baseParams, disableWorker: !canUseWorker });
-      } catch (e) {
+      } catch {
         // Retry once without worker as a safety net.
         pdf = await tryLoad({ ...baseParams, disableWorker: true });
       }
@@ -106,6 +147,40 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
       }
     };
   }, [pdfUrl]);
+
+  useEffect(() => {
+    // iOS Safari emits non-standard gesture events for pinch.
+    // Prevent default so pinching the PDF doesn't trigger browser/OS gestures.
+    const el = scrollRef.current;
+    if (!el) return;
+    const prevent = (e: Event) => {
+      if (typeof e.cancelable === "boolean" && e.cancelable) e.preventDefault();
+    };
+    el.addEventListener("gesturestart", prevent, { passive: false });
+    el.addEventListener("gesturechange", prevent, { passive: false });
+    el.addEventListener("gestureend", prevent, { passive: false });
+    return () => {
+      el.removeEventListener("gesturestart", prevent);
+      el.removeEventListener("gesturechange", prevent);
+      el.removeEventListener("gestureend", prevent);
+    };
+  }, []);
+
+  useEffect(() => {
+    const pending = pendingScrollAdjustRef.current;
+    if (!pending) return;
+    pendingScrollAdjustRef.current = null;
+
+    // Wait for layout to react (pages will re-render at the new scale).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+        scroller.scrollLeft = pending.anchorX * pending.ratio - pending.midOffsetX;
+        scroller.scrollTop = pending.anchorY * pending.ratio - pending.midOffsetY;
+      });
+    });
+  }, [renderScale]);
 
   if (loading) {
     return (
@@ -174,8 +249,45 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
           )}
           <div
             className="flex-1 overflow-auto bg-muted/20"
+            ref={scrollRef}
             onPointerDown={(e) => {
               if (!isMobile) return;
+
+              // Global pinch-to-zoom (two pointers) across ALL pages.
+              // This updates a temporary transform for responsive feedback,
+              // then commits the new `renderScale` on release (re-rendering all pages).
+              const scroller = scrollRef.current;
+              if (!scroller) return;
+              pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+              if (pointersRef.current.size === 2) {
+                const pts = Array.from(pointersRef.current.values());
+                const dx = pts[0].x - pts[1].x;
+                const dy = pts[0].y - pts[1].y;
+                const dist = Math.hypot(dx, dy) || 1;
+                const midClientX = (pts[0].x + pts[1].x) / 2;
+                const midClientY = (pts[0].y + pts[1].y) / 2;
+                const scrollRect = scroller.getBoundingClientRect();
+
+                const anchorX = scroller.scrollLeft + (midClientX - scrollRect.left);
+                const anchorY = scroller.scrollTop + (midClientY - scrollRect.top);
+
+                pinchStartRef.current = {
+                  startRenderScale: renderScale,
+                  startDist: dist,
+                  anchorX,
+                  anchorY,
+                  scrollLeft: scroller.scrollLeft,
+                  scrollTop: scroller.scrollTop,
+                  scrollRectLeft: scrollRect.left,
+                  scrollRectTop: scrollRect.top,
+                  lastMidOffsetX: midClientX - scrollRect.left,
+                  lastMidOffsetY: midClientY - scrollRect.top,
+                };
+                lastCombinedScaleRef.current = renderScale;
+                setGesture({ active: true, scale: 1, tx: 0, ty: 0 });
+              }
+
               // Only consider single-pointer taps for the center-toggle gesture.
               if (e.isPrimary === false) return;
               tapRef.current = {
@@ -188,12 +300,73 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
             }}
             onPointerMove={(e) => {
               if (!isMobile) return;
+
+              // Global pinch move
+              if (pointersRef.current.has(e.pointerId)) {
+                pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+                const start = pinchStartRef.current;
+                if (start && pointersRef.current.size === 2) {
+                  const pts = Array.from(pointersRef.current.values());
+                  const midClientX = (pts[0].x + pts[1].x) / 2;
+                  const midClientY = (pts[0].y + pts[1].y) / 2;
+                  const dx = pts[0].x - pts[1].x;
+                  const dy = pts[0].y - pts[1].y;
+                  const dist = Math.hypot(dx, dy) || 1;
+
+                  const rawCombined = start.startRenderScale * (dist / start.startDist);
+                  const combined = clamp(rawCombined, MIN_RENDER_SCALE, MAX_RENDER_SCALE);
+                  lastCombinedScaleRef.current = combined;
+
+                  const gScale = combined / start.startRenderScale;
+
+                  const midOffsetX = midClientX - start.scrollRectLeft;
+                  const midOffsetY = midClientY - start.scrollRectTop;
+                  start.lastMidOffsetX = midOffsetX;
+                  start.lastMidOffsetY = midOffsetY;
+
+                  // Keep the anchor point under the midpoint stable:
+                  // screenX = rectLeft + (tx + gScale*anchorX - scrollLeft)
+                  const tx = midOffsetX + start.scrollLeft - gScale * start.anchorX;
+                  const ty = midOffsetY + start.scrollTop - gScale * start.anchorY;
+                  setGesture({ active: true, scale: gScale, tx, ty });
+                }
+              }
+
               const t = tapRef.current;
               if (!t || t.pointerId !== e.pointerId) return;
               if (Math.hypot(e.clientX - t.x, e.clientY - t.y) > 10) t.moved = true;
             }}
             onPointerUp={(e) => {
               if (!isMobile) return;
+
+              // End global pinch if needed (commit `renderScale` so all pages re-render).
+              if (pointersRef.current.has(e.pointerId)) {
+                pointersRef.current.delete(e.pointerId);
+                if (pointersRef.current.size < 2 && pinchStartRef.current) {
+                  const start = pinchStartRef.current;
+                  pinchStartRef.current = null;
+
+                  const nextRenderScale = clamp(
+                    lastCombinedScaleRef.current,
+                    MIN_RENDER_SCALE,
+                    MAX_RENDER_SCALE,
+                  );
+                  const ratio = nextRenderScale / start.startRenderScale;
+
+                  pendingScrollAdjustRef.current = {
+                    anchorX: start.anchorX,
+                    anchorY: start.anchorY,
+                    midOffsetX: start.lastMidOffsetX,
+                    midOffsetY: start.lastMidOffsetY,
+                    ratio,
+                  };
+
+                  setGesture({ active: false, scale: 1, tx: 0, ty: 0 });
+                  setRenderScale(nextRenderScale);
+                }
+              }
+
               const t = tapRef.current;
               tapRef.current = null;
               if (!t || t.pointerId !== e.pointerId) return;
@@ -215,12 +388,28 @@ export function PdfReader({ pdfUrl, fileName, bookId }: PdfReaderProps) {
               setChromeVisible((v) => !v);
             }}
             onPointerCancel={() => {
+              pointersRef.current.clear();
+              pinchStartRef.current = null;
+              setGesture({ active: false, scale: 1, tx: 0, ty: 0 });
               tapRef.current = null;
             }}
           >
-            <div className="pdfViewer max-w-4xl mx-auto py-6 space-y-6">
+            <div
+              ref={viewerRef}
+              className="pdfViewer max-w-4xl mx-auto py-6 space-y-6"
+              style={
+                gesture.active
+                  ? {
+                      transform: `translate3d(${gesture.tx}px, ${gesture.ty}px, 0) scale(${gesture.scale})`,
+                      transformOrigin: "0 0",
+                      willChange: "transform",
+                    }
+                  : undefined
+              }
+              onDoubleClick={() => setRenderScale(1)}
+            >
               {Array.from({ length: pdfDoc.numPages }, (_, idx) => (
-                <LazyPdfPage key={idx + 1} pdf={pdfDoc} pageNumber={idx + 1} />
+                <LazyPdfPage key={idx + 1} pdf={pdfDoc} pageNumber={idx + 1} scale={renderScale} />
               ))}
             </div>
           </div>
@@ -338,50 +527,6 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerHostRef = useRef<HTMLDivElement | null>(null);
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
-  const zoomLayerRef = useRef<HTMLDivElement | null>(null);
-
-  const MIN_ZOOM = 0.7; // allow "over-zoom out" while pinching
-  const MAX_ZOOM = 4;
-  const SNAP_BACK_THRESHOLD = 1.08; // snap back to min zoom on release near 1x
-
-  const [view, setView] = useState<{ scale: number; x: number; y: number }>(() => ({
-    scale: 1,
-    x: 0,
-    y: 0,
-  }));
-  const [isInteracting, setIsInteracting] = useState(false);
-
-  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
-  const gestureStartRef = useRef<{
-    startScale: number;
-    startX: number;
-    startY: number;
-    startDist: number;
-  } | null>(null);
-  const panRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
-
-  const clampToBounds = (next: { scale: number; x: number; y: number }) => {
-    const host = pageContainerRef.current;
-    if (!host) return next;
-    const w = host.clientWidth || 0;
-    const h = host.clientHeight || 0;
-    if (w <= 0 || h <= 0) return next;
-
-    // When zoomed out below 1x (only allowed during pinch), keep the page centered.
-    if (next.scale < 1) {
-      const cx = (w - w * next.scale) / 2;
-      const cy = (h - h * next.scale) / 2;
-      return { scale: next.scale, x: cx, y: cy };
-    }
-
-    const minX = w - w * next.scale;
-    const minY = h - h * next.scale;
-    return {
-      scale: next.scale,
-      x: clamp(next.x, minX, 0),
-      y: clamp(next.y, minY, 0),
-    };
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -391,7 +536,7 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
     // Cast at the assignment site to avoid TypeScript variance issues across versions.
     let textLayerBuilder: {
       cancel?: () => void;
-      render?: (opts: any) => Promise<any>;
+      render?: (opts: { viewport: unknown }) => Promise<unknown>;
     } | null = null;
 
     const render = async () => {
@@ -453,12 +598,9 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
           });
           textLayerHost.appendChild(div);
         },
-      }) as any;
+      }) as unknown as { cancel?: () => void; render?: (opts: { viewport: unknown }) => Promise<unknown> };
 
       await textLayerBuilder?.render?.({ viewport });
-
-      // Reset zoom/pan on (re)render so each page starts "fit to screen".
-      setView({ scale: 1, x: 0, y: 0 });
     };
 
     render().catch(() => {
@@ -472,140 +614,13 @@ function PdfPage({ pdf, pageNumber, scale = 1 }: PdfPageProps) {
     };
   }, [pdf, pageNumber, scale]);
 
-  useEffect(() => {
-    // iOS Safari emits non-standard gesture events for pinch.
-    // Prevent default so pinching the PDF doesn't trigger browser/OS gestures (e.g. tab UI).
-    const el = zoomLayerRef.current;
-    if (!el) return;
-
-    const prevent = (e: Event) => {
-      if (typeof e.cancelable === "boolean" && e.cancelable) e.preventDefault();
-    };
-    el.addEventListener("gesturestart", prevent as any, { passive: false });
-    el.addEventListener("gesturechange", prevent as any, { passive: false });
-    el.addEventListener("gestureend", prevent as any, { passive: false });
-    return () => {
-      el.removeEventListener("gesturestart", prevent as any);
-      el.removeEventListener("gesturechange", prevent as any);
-      el.removeEventListener("gestureend", prevent as any);
-    };
-  }, []);
-
-  const toLocal = (clientX: number, clientY: number) => {
-    const host = pageContainerRef.current;
-    if (!host) return { x: clientX, y: clientY };
-    const rect = host.getBoundingClientRect();
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    const el = e.currentTarget as HTMLElement;
-    el.setPointerCapture(e.pointerId);
-
-    setIsInteracting(true);
-
-    const p = toLocal(e.clientX, e.clientY);
-    pointersRef.current.set(e.pointerId, p);
-
-    if (pointersRef.current.size === 1) {
-      panRef.current = { pointerId: e.pointerId, lastX: p.x, lastY: p.y };
-    }
-
-    if (pointersRef.current.size === 2) {
-      const pts = Array.from(pointersRef.current.values());
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      const dist = Math.hypot(dx, dy) || 1;
-      gestureStartRef.current = {
-        startScale: view.scale,
-        startX: view.x,
-        startY: view.y,
-        startDist: dist,
-      };
-      panRef.current = null;
-    }
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!pointersRef.current.has(e.pointerId)) return;
-    const p = toLocal(e.clientX, e.clientY);
-    pointersRef.current.set(e.pointerId, p);
-
-    // Pinch zoom (two pointers)
-    if (pointersRef.current.size === 2 && gestureStartRef.current) {
-      const pts = Array.from(pointersRef.current.values());
-      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      const dist = Math.hypot(dx, dy) || 1;
-
-      const start = gestureStartRef.current;
-      const rawScale = start.startScale * (dist / start.startDist);
-      const nextScale = clamp(rawScale, MIN_ZOOM, MAX_ZOOM);
-
-      // Keep the midpoint stable while scaling with transformOrigin 0 0:
-      // x1 = m - (m - x0)/s0 * s1
-      const nextX = mid.x - ((mid.x - start.startX) / start.startScale) * nextScale;
-      const nextY = mid.y - ((mid.y - start.startY) / start.startScale) * nextScale;
-
-      setView((prev) => clampToBounds({ ...prev, scale: nextScale, x: nextX, y: nextY }));
-      return;
-    }
-
-    // Pan (one pointer) only when zoomed in.
-    const pan = panRef.current;
-    if (!pan || pan.pointerId !== e.pointerId) return;
-    if (view.scale <= 1) return;
-
-    const dx = p.x - pan.lastX;
-    const dy = p.y - pan.lastY;
-    panRef.current = { ...pan, lastX: p.x, lastY: p.y };
-
-    setView((prev) => clampToBounds({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-  };
-
-  const onPointerUp = (e: React.PointerEvent) => {
-    pointersRef.current.delete(e.pointerId);
-    if (panRef.current?.pointerId === e.pointerId) panRef.current = null;
-    if (pointersRef.current.size < 2) gestureStartRef.current = null;
-    if (pointersRef.current.size === 1) {
-      const remaining = Array.from(pointersRef.current.entries())[0];
-      if (remaining) {
-        panRef.current = { pointerId: remaining[0], lastX: remaining[1].x, lastY: remaining[1].y };
-      }
-    }
-    setIsInteracting(pointersRef.current.size > 0);
-
-    // Snap back to the minimum zoom (fit) if the user ends near it (or below it).
-    setView((prev) =>
-      prev.scale < SNAP_BACK_THRESHOLD ? { scale: 1, x: 0, y: 0 } : clampToBounds(prev),
-    );
-  };
-
   return (
     <div className="w-full flex justify-center">
-      <div ref={pageContainerRef} className="page relative shadow-sm border bg-white overflow-hidden">
-        <div
-          ref={zoomLayerRef}
-          className="absolute inset-0"
-          style={{
-            transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
-            transformOrigin: "0 0",
-            transition: isInteracting ? "none" : "transform 160ms ease-out",
-            // Allow normal one-finger scroll when not zoomed.
-            touchAction: view.scale !== 1 ? "none" : "pan-y",
-          }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onDoubleClick={() => setView({ scale: 1, x: 0, y: 0 })}
-        >
-          <div className="canvasWrapper">
-            <canvas ref={canvasRef} className="pointer-events-none block" />
-          </div>
-          <div ref={textLayerHostRef} className="absolute inset-0" />
+      <div ref={pageContainerRef} className="page relative shadow-sm border bg-white">
+        <div className="canvasWrapper">
+          <canvas ref={canvasRef} className="pointer-events-none block" />
         </div>
+        <div ref={textLayerHostRef} className="absolute inset-0" />
       </div>
     </div>
   );
