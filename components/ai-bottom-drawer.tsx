@@ -175,7 +175,7 @@ export function AIBottomDrawer({
         className="fixed bottom-0 left-0 right-0 z-50"
         style={{ height: `${heightPx}px` }}
       >
-        <div className="h-full w-full rounded-t-2xl border-t border-border bg-background shadow-2xl flex flex-col overflow-hidden">
+        <div className="h-full w-full rounded-t-2xl border-t border-border bg-background shadow-2xl flex flex-col overflow-hidden min-h-0">
           {/* Pill / handle */}
           <div
             className="h-6 flex items-center justify-center touch-none"
@@ -210,7 +210,7 @@ export function AIBottomDrawer({
                 // If the user runs an action from the quick state, expand so they can see the response.
                 if (mode === "quick") setMode("half");
               }}
-              className="flex-1 flex flex-col"
+              className="flex-1 flex flex-col min-h-0"
             />
           )}
         </div>

@@ -584,8 +584,9 @@ export function AIAgentPanel({
     <div
       data-ai-pane="true"
       className={
-        className ??
-        "bg-background border-l border-border shadow-lg flex flex-col select-text"
+        (className ??
+          "bg-background border-l border-border shadow-lg flex flex-col select-text") +
+        " min-h-0"
       }
     >
       {/* Header */}
@@ -593,7 +594,6 @@ export function AIAgentPanel({
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-primary" />
-            <h2 className="font-semibold text-lg text-foreground">AI Assistant</h2>
           </div>
           {onClose && (
             <Button
@@ -621,7 +621,10 @@ export function AIAgentPanel({
 
       {/* Messages */}
       {showMessages && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div
+          className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 overscroll-contain"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
           {messages.map((message) => (
             <div
               key={message.id}
